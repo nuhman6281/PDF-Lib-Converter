@@ -150,17 +150,17 @@ private:
             const std::string& token = tokens[i];
             
             try {
-                // Graphics state commands
-                if (token == "gsave") {
+                // Graphics state commands (full and abbreviated)
+                if (token == "gsave" || token == "q") {
                     state_stack_.push(current_state_);
-                } else if (token == "grestore") {
+                } else if (token == "grestore" || token == "Q") {
                     if (!state_stack_.empty()) {
                         current_state_ = state_stack_.top();
                         state_stack_.pop();
                     }
-                } else if (token == "setlinewidth" && i > 0 && IsNumeric(tokens[i-1])) {
+                } else if ((token == "setlinewidth" || token == "w") && i > 0 && IsNumeric(tokens[i-1])) {
                     current_state_.line_width = std::stod(tokens[i-1]);
-                } else if (token == "setrgbcolor" && i >= 3 && 
+                } else if ((token == "setrgbcolor" || token == "rg") && i >= 3 && 
                           IsNumeric(tokens[i-3]) && IsNumeric(tokens[i-2]) && IsNumeric(tokens[i-1])) {
                     current_state_.color_rgb = {
                         std::stod(tokens[i-3]),
@@ -168,8 +168,8 @@ private:
                         std::stod(tokens[i-1])
                     };
                 }
-                // Path construction commands
-                else if (token == "moveto" && i >= 2 && 
+                // Path construction commands (full and abbreviated)
+                else if ((token == "moveto" || token == "m") && i >= 2 && 
                         IsNumeric(tokens[i-2]) && IsNumeric(tokens[i-1])) {
                     double x = std::stod(tokens[i-2]);
                     double y = std::stod(tokens[i-1]);
@@ -181,7 +181,7 @@ private:
                     element.points = {x, y};
                     current_path_.push_back(element);
                     
-                } else if (token == "lineto" && i >= 2 && 
+                } else if ((token == "lineto" || token == "l") && i >= 2 && 
                           IsNumeric(tokens[i-2]) && IsNumeric(tokens[i-1])) {
                     double x = std::stod(tokens[i-2]);
                     double y = std::stod(tokens[i-1]);
@@ -193,7 +193,7 @@ private:
                     element.points = {x, y};
                     current_path_.push_back(element);
                     
-                } else if (token == "curveto" && i >= 6 && 
+                } else if ((token == "curveto" || token == "c") && i >= 6 && 
                           IsNumeric(tokens[i-6]) && IsNumeric(tokens[i-5]) && 
                           IsNumeric(tokens[i-4]) && IsNumeric(tokens[i-3]) && 
                           IsNumeric(tokens[i-2]) && IsNumeric(tokens[i-1])) {
@@ -208,12 +208,12 @@ private:
                     current_state_.current_x = element.points[4];
                     current_state_.current_y = element.points[5];
                     
-                } else if (token == "closepath") {
+                } else if (token == "closepath" || token == "h") {
                     PathElement element;
                     element.type = PathElement::CLOSE_PATH;
                     current_path_.push_back(element);
                     
-                } else if (token == "stroke" || token == "fill") {
+                } else if (token == "stroke" || token == "s" || token == "fill" || token == "f" || token == "F") {
                     // Commit current path to page
                     if (!pages_.empty() && !current_path_.empty()) {
                         for (const auto& element : current_path_) {
@@ -224,7 +224,7 @@ private:
                     
                 }
                 // Text commands
-                else if (token == "show" && i > 0) {
+                else if ((token == "show" || token == "Tj") && i > 0) {
                     // Extract text from previous token (should be a string in parentheses)
                     std::string text_token = tokens[i-1];
                     if (text_token.front() == '(' && text_token.back() == ')') {

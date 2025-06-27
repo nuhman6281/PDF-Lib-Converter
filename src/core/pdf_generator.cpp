@@ -177,6 +177,9 @@ private:
     }
     
     void CreatePageObjects() {
+        // Calculate font object ID first
+        int font_obj_id = next_object_id_ + static_cast<int>(pages_.size() * 2);
+        
         for (size_t page_idx = 0; page_idx < pages_.size(); ++page_idx) {
             const auto& page = pages_[page_idx];
             
@@ -184,9 +187,13 @@ private:
             std::ostringstream page_stream;
             GeneratePageContent(page, page_stream);
             
-            // Create content stream object
+            // Create page object first
+            PDFObject page_obj;
+            page_obj.id = next_object_id_++;
+            
+            // Create content stream object with next ID
             PDFObject content_obj;
-            content_obj.id = next_object_id_ + static_cast<int>(pages_.size()) + static_cast<int>(page_idx);
+            content_obj.id = next_object_id_++;
             
             std::ostringstream content_obj_stream;
             content_obj_stream << "<<\n";
@@ -198,10 +205,6 @@ private:
             
             content_obj.content = content_obj_stream.str();
             
-            // Create page object
-            PDFObject page_obj;
-            page_obj.id = next_object_id_++;
-            
             std::ostringstream page_obj_content;
             page_obj_content << "<<\n";
             page_obj_content << "/Type /Page\n";
@@ -209,7 +212,7 @@ private:
             page_obj_content << "/MediaBox [0 0 " << page.width << " " << page.height << "]\n";
             page_obj_content << "/Contents " << content_obj.id << " 0 R\n";
             page_obj_content << "/Resources <<\n";
-            page_obj_content << "  /Font << /F1 " << (next_object_id_ + static_cast<int>(pages_.size() * 2)) << " 0 R >>\n";
+            page_obj_content << "  /Font << /F1 " << font_obj_id << " 0 R >>\n";
             page_obj_content << ">>\n";
             page_obj_content << ">>\n";
             
@@ -217,8 +220,6 @@ private:
             objects_.push_back(page_obj);
             objects_.push_back(content_obj);
         }
-        
-        next_object_id_ += static_cast<int>(pages_.size());
     }
     
     void CreateFontObject() {
@@ -237,27 +238,23 @@ private:
     }
     
     void GeneratePageContent(const PDFPageData& page, std::ostringstream& content) {
-        content << "BT\n"; // Begin text
-        content << "/F1 12 Tf\n"; // Set font
+        content << std::fixed << std::setprecision(2);
         
-        // Render text elements
-        for (const auto& text : page.text_elements) {
-            content << std::fixed << std::setprecision(2);
-            content << text.color_rgb[0] << " " << text.color_rgb[1] << " " << text.color_rgb[2] << " rg\n";
-            content << text.x << " " << text.y << " Td\n";
-            content << "(" << EscapeString(text.text) << ") Tj\n";
-        }
+        // Set initial graphics state
+        content << "q\n"; // Save graphics state
+        content << "1 0 0 1 0 0 cm\n"; // Identity matrix
         
-        content << "ET\n"; // End text
-        
-        // Render path elements
+        // Render paths first (background graphics)
+        bool has_open_path = false;
         for (const auto& path : page.paths) {
-            content << std::fixed << std::setprecision(2);
-            
             switch (path.type) {
                 case PathElement::MOVE_TO:
                     if (path.points.size() >= 2) {
+                        if (has_open_path) {
+                            content << "S\n"; // Stroke previous path
+                        }
                         content << path.points[0] << " " << path.points[1] << " m\n";
+                        has_open_path = true;
                     }
                     break;
                     
@@ -281,9 +278,28 @@ private:
             }
         }
         
-        if (!page.paths.empty()) {
-            content << "S\n"; // Stroke paths
+        if (has_open_path) {
+            content << "S\n"; // Stroke final path
         }
+        
+        // Render text elements
+        if (!page.text_elements.empty()) {
+            content << "BT\n"; // Begin text
+            content << "/F1 12 Tf\n"; // Set font
+            
+            for (const auto& text : page.text_elements) {
+                // Set text color
+                content << text.color_rgb[0] << " " << text.color_rgb[1] << " " << text.color_rgb[2] << " rg\n";
+                // Position text 
+                content << "1 0 0 1 " << text.x << " " << text.y << " Tm\n";
+                // Show text
+                content << "(" << EscapeString(text.text) << ") Tj\n";
+            }
+            
+            content << "ET\n"; // End text
+        }
+        
+        content << "Q\n"; // Restore graphics state
     }
     
     std::string EscapeString(const std::string& str) {
