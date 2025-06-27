@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <ctime>
 #include <algorithm>
+#include <iostream>
 
 namespace PDFLib {
 
@@ -240,6 +241,9 @@ private:
     void GeneratePageContent(const PDFPageData& page, std::ostringstream& content) {
         content << std::fixed << std::setprecision(2);
         
+        std::cout << "DEBUG: Generating content for page with " << page.paths.size() << " paths and " 
+                  << page.text_elements.size() << " text elements" << std::endl;
+        
         // Set initial graphics state
         content << "q\n"; // Save graphics state
         content << "1 0 0 1 0 0 cm\n"; // Identity matrix
@@ -251,11 +255,16 @@ private:
         content << "1 J\n"; // Set line cap to round
         content << "1 j\n"; // Set line join to round
         
-
-        
         // Render paths first (background graphics)
         bool has_open_path = false;
+        int path_count = 0;
         for (const auto& path : page.paths) {
+            path_count++;
+            if (path_count <= 5) { // Debug first 5 paths
+                std::cout << "DEBUG: Path " << path_count << " type=" << static_cast<int>(path.type) 
+                          << " points=" << path.points.size() << std::endl;
+            }
+            
             switch (path.type) {
                 case PathElement::MOVE_TO:
                     if (path.points.size() >= 2) {
@@ -292,12 +301,15 @@ private:
             content << "S\n"; // Stroke final path
         }
         
+        std::cout << "DEBUG: Generated " << path_count << " path elements" << std::endl;
+        
         // Render text elements
         if (!page.text_elements.empty()) {
             content << "BT\n"; // Begin text
             content << "/F1 12 Tf\n"; // Set font
             
             for (const auto& text : page.text_elements) {
+                std::cout << "DEBUG: Rendering text: '" << text.text << "' at (" << text.x << "," << text.y << ")" << std::endl;
                 // Set text color (non-stroking color for text)
                 content << text.color_rgb[0] << " " << text.color_rgb[1] << " " << text.color_rgb[2] << " rg\n";
                 // Position text 
@@ -310,6 +322,8 @@ private:
         }
         
         content << "Q\n"; // Restore graphics state
+        
+        std::cout << "DEBUG: Content stream length: " << content.str().length() << " characters" << std::endl;
     }
     
     std::string EscapeString(const std::string& str) {

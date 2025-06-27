@@ -9,7 +9,7 @@
 #include <string>
 #include <memory>
 #include <functional>
-#include "../include/pdf_lib.h"
+#include "include/pdf_lib.h"
 
 namespace PDFLib {
 

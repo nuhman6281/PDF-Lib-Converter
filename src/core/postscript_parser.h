@@ -25,7 +25,8 @@ struct GraphicsState {
     double current_x = 0.0;
     double current_y = 0.0;
     double line_width = 1.0;
-    std::vector<double> color_rgb = {0.0, 0.0, 0.0}; // Black
+    double color_rgb[3] = {0.0, 0.0, 0.0}; // Black by default
+    bool gsave_active = false;
     std::string font_name = "Helvetica";
     double font_size = 12.0;
     double rotation = 0.0;
@@ -50,6 +51,26 @@ struct TextElement {
     std::string font_name;
     double font_size;
     std::vector<double> color_rgb;
+};
+
+/**
+ * @brief PostScript bounding box
+ */
+struct BoundingBox {
+    double x1 = 0.0, y1 = 0.0, x2 = 612.0, y2 = 792.0; // Default A4 size
+    bool valid = false;
+};
+
+/**
+ * @brief PostScript coordinate transform
+ */
+struct CoordinateTransform {
+    double scale_x = 1.0;
+    double scale_y = 1.0;
+    double offset_x = 0.0;
+    double offset_y = 0.0;
+    double page_width = 612.0;  // Default A4 width
+    double page_height = 792.0; // Default A4 height
 };
 
 /**
@@ -132,10 +153,26 @@ public:
      * @return Document creator or empty string
      */
     std::string GetCreator() const;
+    
+    // Coordinate transformation methods
+    void TransformCoordinates(double& x, double& y);
+    void SetupCoordinateTransform();
+    void ParseBoundingBox(const std::string& line);
+    
+    // Getters
+    const std::vector<PathElement>& GetPaths() const { return paths; }
+    const std::vector<TextElement>& GetTextElements() const { return text_elements; }
+    const BoundingBox& GetBoundingBox() const { return bounding_box; }
+    const CoordinateTransform& GetCoordinateTransform() const { return coord_transform; }
 
 private:
     class Impl;
     std::unique_ptr<Impl> pImpl;
+    std::vector<PathElement> paths;
+    std::vector<TextElement> text_elements;
+    GraphicsState graphics_state;
+    BoundingBox bounding_box;
+    CoordinateTransform coord_transform;
 };
 
 } // namespace PDFLib

@@ -10,6 +10,7 @@
 #include <regex>
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 namespace PDFLib {
 
@@ -28,6 +29,12 @@ public:
     double bbox_x1_ = 0, bbox_y1_ = 0, bbox_x2_ = 595.276, bbox_y2_ = 841.890;
     bool dsc_compliant_ = false;
     
+    // Coordinate transformation parameters
+    double transform_scale_ = 1.0;
+    double transform_offset_x_ = 0.0;
+    double transform_offset_y_ = 0.0;
+    double transform_pdf_height_ = 842.0;
+    
     GraphicsState current_state_;
     std::stack<GraphicsState> state_stack_;
     std::vector<PathElement> current_path_;
@@ -43,7 +50,18 @@ public:
                            std::istreambuf_iterator<char>());
         file.close();
         
-        return ParseContent(content, error_handler);
+        std::cout << "DEBUG: Starting to parse PostScript file: " << filepath << std::endl;
+        std::cout << "DEBUG: File size: " << content.length() << " characters" << std::endl;
+        
+        bool result = ParseContent(content, error_handler);
+        
+        std::cout << "DEBUG: Parsing complete. Found " << pages_.size() << " pages" << std::endl;
+        for (size_t i = 0; i < pages_.size(); ++i) {
+            std::cout << "DEBUG: Page " << i << " has " << pages_[i].paths.size() << " paths and " 
+                      << pages_[i].text_elements.size() << " text elements" << std::endl;
+        }
+        
+        return result;
     }
     
     bool ParseContent(const std::string& content, ErrorHandler& error_handler) {
@@ -59,6 +77,9 @@ public:
             
             // Parse DSC comments first
             ParseDSCComments(lines);
+            
+            // Setup coordinate transformation based on bounding box
+            SetupCoordinateTransform();
             
             // Create initial page
             pages_.emplace_back();
@@ -119,10 +140,18 @@ private:
     }
     
     void ParseBoundingBox(const std::string& line) {
-        std::string bbox_str = Trim(line.substr(14));
-        std::istringstream iss(bbox_str);
+        std::regex bbox_regex(R"(%%BoundingBox:\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+))");
+        std::smatch match;
         
-        if (iss >> bbox_x1_ >> bbox_y1_ >> bbox_x2_ >> bbox_y2_) {
+        if (std::regex_search(line, match, bbox_regex)) {
+            bbox_x1_ = std::stod(match[1].str());
+            bbox_y1_ = std::stod(match[2].str());
+            bbox_x2_ = std::stod(match[3].str());
+            bbox_y2_ = std::stod(match[4].str());
+            
+            std::cout << "Parsed bounding box: " << bbox_x1_ << " " << bbox_y1_ 
+                      << " " << bbox_x2_ << " " << bbox_y2_ << std::endl;
+            
             // Update page dimensions if we have pages
             if (!pages_.empty()) {
                 pages_[0].width = bbox_x2_ - bbox_x1_;
@@ -162,17 +191,21 @@ private:
                     current_state_.line_width = std::stod(tokens[i-1]);
                 } else if ((token == "setrgbcolor" || token == "rg") && i >= 3 && 
                           IsNumeric(tokens[i-3]) && IsNumeric(tokens[i-2]) && IsNumeric(tokens[i-1])) {
-                    current_state_.color_rgb = {
-                        std::stod(tokens[i-3]),
-                        std::stod(tokens[i-2]),
-                        std::stod(tokens[i-1])
-                    };
+                    current_state_.color_rgb[0] = std::stod(tokens[i-3]);
+                    current_state_.color_rgb[1] = std::stod(tokens[i-2]);
+                    current_state_.color_rgb[2] = std::stod(tokens[i-1]);
                 }
                 // Path construction commands (full and abbreviated)
                 else if ((token == "moveto" || token == "m") && i >= 2 && 
                         IsNumeric(tokens[i-2]) && IsNumeric(tokens[i-1])) {
                     double x = std::stod(tokens[i-2]);
                     double y = std::stod(tokens[i-1]);
+                    
+                    std::cout << "Processing moveto: (" << x << "," << y << ")" << std::endl;
+                    
+                    // Apply coordinate transformation
+                    TransformCoordinates(x, y);
+                    
                     current_state_.current_x = x;
                     current_state_.current_y = y;
                     
@@ -181,12 +214,16 @@ private:
                     element.points = {x, y};
                     current_path_.push_back(element);
                     
-
+                    std::cout << "Added moveto path element" << std::endl;
                     
                 } else if ((token == "lineto" || token == "l") && i >= 2 && 
                           IsNumeric(tokens[i-2]) && IsNumeric(tokens[i-1])) {
                     double x = std::stod(tokens[i-2]);
                     double y = std::stod(tokens[i-1]);
+                    
+                    // Apply coordinate transformation
+                    TransformCoordinates(x, y);
+                    
                     current_state_.current_x = x;
                     current_state_.current_y = y;
                     
@@ -195,29 +232,33 @@ private:
                     element.points = {x, y};
                     current_path_.push_back(element);
                     
-
-                    
                 } else if ((token == "curveto" || token == "c") && i >= 6 && 
                           IsNumeric(tokens[i-6]) && IsNumeric(tokens[i-5]) && 
                           IsNumeric(tokens[i-4]) && IsNumeric(tokens[i-3]) && 
                           IsNumeric(tokens[i-2]) && IsNumeric(tokens[i-1])) {
+                    double x1 = std::stod(tokens[i-6]);
+                    double y1 = std::stod(tokens[i-5]);
+                    double x2 = std::stod(tokens[i-4]);
+                    double y2 = std::stod(tokens[i-3]);
+                    double x3 = std::stod(tokens[i-2]);
+                    double y3 = std::stod(tokens[i-1]);
+                    
+                    // Apply coordinate transformation to all control points
+                    TransformCoordinates(x1, y1);
+                    TransformCoordinates(x2, y2);
+                    TransformCoordinates(x3, y3);
+                    
                     PathElement element;
                     element.type = PathElement::CURVE_TO;
-                    element.points = {
-                        std::stod(tokens[i-6]), std::stod(tokens[i-5]),  // cp1
-                        std::stod(tokens[i-4]), std::stod(tokens[i-3]),  // cp2
-                        std::stod(tokens[i-2]), std::stod(tokens[i-1])   // end point
-                    };
+                    element.points = {x1, y1, x2, y2, x3, y3};
                     current_path_.push_back(element);
-                    current_state_.current_x = element.points[4];
-                    current_state_.current_y = element.points[5];
+                    current_state_.current_x = x3;
+                    current_state_.current_y = y3;
                     
                 } else if (token == "closepath" || token == "h") {
                     PathElement element;
                     element.type = PathElement::CLOSE_PATH;
                     current_path_.push_back(element);
-                    
-
                     
                 } else if (token == "stroke" || token == "s") {
                     // Complete current path and add to page
@@ -245,13 +286,21 @@ private:
                     if (text_token.front() == '(' && text_token.back() == ')') {
                         std::string text = text_token.substr(1, text_token.length() - 2);
                         
+                        double x = current_state_.current_x;
+                        double y = current_state_.current_y;
+                        
+                        // Apply coordinate transformation to text position
+                        TransformCoordinates(x, y);
+                        
                         TextElement text_element;
                         text_element.text = text;
-                        text_element.x = current_state_.current_x;
-                        text_element.y = current_state_.current_y;
+                        text_element.x = x;
+                        text_element.y = y;
                         text_element.font_name = current_state_.font_name;
                         text_element.font_size = current_state_.font_size;
-                        text_element.color_rgb = current_state_.color_rgb;
+                        text_element.color_rgb[0] = current_state_.color_rgb[0];
+                        text_element.color_rgb[1] = current_state_.color_rgb[1];
+                        text_element.color_rgb[2] = current_state_.color_rgb[2];
                         
                         if (!pages_.empty()) {
                             pages_.back().text_elements.push_back(text_element);
@@ -313,6 +362,49 @@ private:
         } catch (const std::exception&) {
             return false;
         }
+    }
+    
+    void SetupCoordinateTransform() {
+        // Calculate PostScript dimensions
+        double ps_width = bbox_x2_ - bbox_x1_;
+        double ps_height = bbox_y2_ - bbox_y1_;
+        
+        // Set PDF page size (A4: 595 x 842 points)
+        double pdf_width = 595.0;
+        double pdf_height = 842.0;
+        
+        // Calculate scale factors to fit content on page
+        double scale_x = pdf_width / ps_width;
+        double scale_y = pdf_height / ps_height;
+        
+        // Use the smaller scale to maintain aspect ratio
+        double scale = std::min(scale_x, scale_y);
+        
+        // Calculate centering offsets
+        double scaled_width = ps_width * scale;
+        double scaled_height = ps_height * scale;
+        double offset_x = (pdf_width - scaled_width) / 2.0;
+        double offset_y = (pdf_height - scaled_height) / 2.0;
+        
+        std::cout << "Coordinate transform: scale=" << scale << " offset=(" << offset_x 
+                  << "," << offset_y << ")" << std::endl;
+        
+        // Store transform parameters for use in path processing
+        transform_scale_ = scale;
+        transform_offset_x_ = offset_x;
+        transform_offset_y_ = offset_y;
+        transform_pdf_height_ = pdf_height;
+    }
+    
+    void TransformCoordinates(double& x, double& y) {
+        // Transform from PostScript coordinates to PDF coordinates
+        double original_x = x;
+        double original_y = y;
+        
+        x = x * transform_scale_ + transform_offset_x_;
+        y = transform_pdf_height_ - (y * transform_scale_ + transform_offset_y_);
+        
+        std::cout << "Transform: (" << original_x << "," << original_y << ") -> (" << x << "," << y << ")" << std::endl;
     }
 };
 
