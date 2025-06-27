@@ -14,6 +14,8 @@
 #include "pdf_generator.h"
 #include <memory>
 #include <algorithm>
+#include <fstream>
+#include <filesystem>
 
 namespace PDFLib {
 
@@ -212,6 +214,33 @@ public:
     }
 
 private:
+    bool CopyFile(const std::string& source, const std::string& destination) {
+        try {
+            std::ifstream src(source, std::ios::binary);
+            std::ofstream dst(destination, std::ios::binary);
+            
+            if (!src.is_open()) {
+                ErrorHandler::GetInstance().SetError(-20, "Cannot open source file: " + source);
+                return false;
+            }
+            
+            if (!dst.is_open()) {
+                ErrorHandler::GetInstance().SetError(-21, "Cannot create destination file: " + destination);
+                return false;
+            }
+            
+            dst << src.rdbuf();
+            
+            src.close();
+            dst.close();
+            
+            return true;
+        } catch (const std::exception& e) {
+            ErrorHandler::GetInstance().SetError(-22, "File copy failed: " + std::string(e.what()));
+            return false;
+        }
+    }
+    
     bool ProcessPostScriptCommands() {
         ErrorHandler::GetInstance().Log("Processing PostScript commands", ErrorSeverity::INFO);
         
@@ -260,6 +289,30 @@ private:
                 
                 ErrorHandler::GetInstance().Log("Successfully converted PostScript to PDF", ErrorSeverity::INFO);
                 
+            } else if (extension == "pdf") {
+                // Handle PDF to PDF conversion (copy or process)
+                if (!pdf_engine_->LoadFile(input_file, ErrorHandler::GetInstance())) {
+                    ErrorHandler::GetInstance().SetError(-4, "Failed to load PDF file: " + input_file);
+                    return false;
+                }
+                
+                // Apply PostScript transformations if any
+                if (postscript_interpreter_->HasTransformations()) {
+                    if (!pdf_engine_->ApplyTransformations(*postscript_interpreter_, ErrorHandler::GetInstance())) {
+                        ErrorHandler::GetInstance().SetError(-12, "Failed to apply PostScript transformations");
+                        return false;
+                    }
+                }
+                
+                // For now, just copy the PDF file since the engine is a stub
+                // In a full implementation, this would process the PDF content
+                if (!CopyFile(input_file, options_.output_file)) {
+                    ErrorHandler::GetInstance().SetError(-6, "Failed to copy PDF to: " + options_.output_file);
+                    return false;
+                }
+                
+                ErrorHandler::GetInstance().Log("Successfully copied PDF to: " + options_.output_file, ErrorSeverity::INFO);
+                
             } else {
                 // Fallback to original engine for other file types
                 if (!pdf_engine_->LoadFile(input_file, ErrorHandler::GetInstance())) {
@@ -274,6 +327,14 @@ private:
                         return false;
                     }
                 }
+                
+                // Save the processed file to output
+                if (!pdf_engine_->SaveFile(options_.output_file, ErrorHandler::GetInstance())) {
+                    ErrorHandler::GetInstance().SetError(-6, "Failed to save file to: " + options_.output_file);
+                    return false;
+                }
+                
+                ErrorHandler::GetInstance().Log("Successfully processed file: " + input_file, ErrorSeverity::INFO);
             }
         }
         
