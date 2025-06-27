@@ -251,14 +251,7 @@ private:
         content << "1 J\n"; // Set line cap to round
         content << "1 j\n"; // Set line join to round
         
-        // Add debug: draw a simple test rectangle to verify PDF structure
-        content << "% Test rectangle\n";
-        content << "100 100 m\n";
-        content << "150 100 l\n";
-        content << "150 150 l\n";
-        content << "100 150 l\n";
-        content << "h\n";
-        content << "S\n";
+
         
         // Render paths first (background graphics)
         bool has_open_path = false;

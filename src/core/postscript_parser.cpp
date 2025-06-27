@@ -10,7 +10,6 @@
 #include <regex>
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 
 namespace PDFLib {
 
@@ -182,8 +181,7 @@ private:
                     element.points = {x, y};
                     current_path_.push_back(element);
                     
-                    // DEBUG: Print what we're parsing
-                    std::cout << "DEBUG: Parsed moveto: " << x << ", " << y << std::endl;
+
                     
                 } else if ((token == "lineto" || token == "l") && i >= 2 && 
                           IsNumeric(tokens[i-2]) && IsNumeric(tokens[i-1])) {
@@ -197,8 +195,7 @@ private:
                     element.points = {x, y};
                     current_path_.push_back(element);
                     
-                    // DEBUG: Print what we're parsing
-                    std::cout << "DEBUG: Parsed lineto: " << x << ", " << y << std::endl;
+
                     
                 } else if ((token == "curveto" || token == "c") && i >= 6 && 
                           IsNumeric(tokens[i-6]) && IsNumeric(tokens[i-5]) && 
@@ -220,21 +217,15 @@ private:
                     element.type = PathElement::CLOSE_PATH;
                     current_path_.push_back(element);
                     
-                    // DEBUG: Print what we're parsing
-                    std::cout << "DEBUG: Parsed closepath" << std::endl;
+
                     
                 } else if (token == "stroke" || token == "s") {
                     // Complete current path and add to page
                     if (!current_path_.empty() && !pages_.empty()) {
-                        // DEBUG: Print what we're parsing
-                        std::cout << "DEBUG: Parsed stroke - adding " << current_path_.size() << " path elements" << std::endl;
-                        
                         for (const auto& path_elem : current_path_) {
                             pages_.back().paths.push_back(path_elem);
                         }
                         current_path_.clear();
-                    } else {
-                        std::cout << "DEBUG: Parsed stroke - no path elements to add" << std::endl;
                     }
                     
                 } else if (token == "fill" || token == "f" || token == "F") {
