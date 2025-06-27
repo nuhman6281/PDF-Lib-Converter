@@ -1,0 +1,315 @@
+/**
+ * @file windows_printer.cpp
+ * @brief Windows-specific printer utilities implementation
+ * @version 1.0.0
+ * @author PDF_LIB Team
+ */
+
+#include "windows_printer.h"
+#include "../../core/error_handler.h"
+#include <iostream>
+#include <map>
+#include <fstream>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <winspool.h>
+#include <tchar.h>
+#endif
+
+namespace PDFLib {
+
+std::vector<std::string> WindowsPrinter::GetAvailablePrinters() {
+    std::vector<std::string> printers;
+    
+#ifdef _WIN32
+    DWORD flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
+    DWORD needed = 0;
+    DWORD returned = 0;
+    
+    // Get required buffer size
+    EnumPrinters(flags, nullptr, 1, nullptr, 0, &needed, &returned);
+    
+    if (needed > 0) {
+        std::vector<uint8_t> buffer(needed);
+        PRINTER_INFO_1* printer_info = reinterpret_cast<PRINTER_INFO_1*>(buffer.data());
+        
+        if (EnumPrinters(flags, nullptr, 1, buffer.data(), needed, &needed, &returned)) {
+            for (DWORD i = 0; i < returned; ++i) {
+                if (printer_info[i].pName) {
+                    std::wstring wname(printer_info[i].pName);
+                    printers.push_back(FromWideString(wname));
+                }
+            }
+        }
+    }
+#else
+    ErrorHandler::GetInstance().SetError(-1, "Windows printer support not available on this platform");
+#endif
+    
+    return printers;
+}
+
+std::string WindowsPrinter::GetDefaultPrinter() {
+    std::string default_printer;
+    
+#ifdef _WIN32
+    DWORD needed = 0;
+    GetDefaultPrinter(nullptr, &needed);
+    
+    if (needed > 0) {
+        std::vector<TCHAR> buffer(needed);
+        if (GetDefaultPrinter(buffer.data(), &needed)) {
+            std::wstring wname(buffer.data());
+            default_printer = FromWideString(wname);
+        }
+    }
+#else
+    ErrorHandler::GetInstance().SetError(-1, "Windows printer support not available on this platform");
+#endif
+    
+    return default_printer;
+}
+
+bool WindowsPrinter::PrinterExists(const std::string& printer_name) {
+#ifdef _WIN32
+    HANDLE printer_handle;
+    std::wstring wprinter_name = ToWideString(printer_name);
+    
+    if (OpenPrinter(const_cast<LPWSTR>(wprinter_name.c_str()), &printer_handle, nullptr)) {
+        ClosePrinter(printer_handle);
+        return true;
+    }
+    
+    return false;
+#else
+    ErrorHandler::GetInstance().SetError(-1, "Windows printer support not available on this platform");
+    return false;
+#endif
+}
+
+bool WindowsPrinter::GetPrinterProperties(const std::string& printer_name, 
+                                          std::map<std::string, std::string>& properties) {
+#ifdef _WIN32
+    HANDLE printer_handle;
+    std::wstring wprinter_name = ToWideString(printer_name);
+    
+    if (!OpenPrinter(const_cast<LPWSTR>(wprinter_name.c_str()), &printer_handle, nullptr)) {
+        ErrorHandler::GetInstance().SetError(-1, "Failed to open printer: " + printer_name);
+        return false;
+    }
+    
+    // Get printer info level 2
+    DWORD needed = 0;
+    GetPrinter(printer_handle, 2, nullptr, 0, &needed);
+    
+    if (needed > 0) {
+        std::vector<uint8_t> buffer(needed);
+        PRINTER_INFO_2* printer_info = reinterpret_cast<PRINTER_INFO_2*>(buffer.data());
+        
+        if (GetPrinter(printer_handle, 2, buffer.data(), needed, &needed)) {
+            if (printer_info->pServerName) {
+                properties["Server"] = FromWideString(printer_info->pServerName);
+            }
+            if (printer_info->pShareName) {
+                properties["Share"] = FromWideString(printer_info->pShareName);
+            }
+            if (printer_info->pPortName) {
+                properties["Port"] = FromWideString(printer_info->pPortName);
+            }
+            if (printer_info->pDriverName) {
+                properties["Driver"] = FromWideString(printer_info->pDriverName);
+            }
+            if (printer_info->pComment) {
+                properties["Comment"] = FromWideString(printer_info->pComment);
+            }
+            if (printer_info->pLocation) {
+                properties["Location"] = FromWideString(printer_info->pLocation);
+            }
+            
+            properties["Status"] = std::to_string(printer_info->Status);
+            properties["Attributes"] = std::to_string(printer_info->Attributes);
+            properties["Priority"] = std::to_string(printer_info->Priority);
+            properties["DefaultPriority"] = std::to_string(printer_info->DefaultPriority);
+        }
+    }
+    
+    ClosePrinter(printer_handle);
+    return true;
+#else
+    ErrorHandler::GetInstance().SetError(-1, "Windows printer support not available on this platform");
+    return false;
+#endif
+}
+
+bool WindowsPrinter::PrintFile(const std::string& printer_name, 
+                               const std::string& file_path, 
+                               const std::string& job_name) {
+#ifdef _WIN32
+    HANDLE printer_handle;
+    std::wstring wprinter_name = ToWideString(printer_name);
+    
+    if (!OpenPrinter(const_cast<LPWSTR>(wprinter_name.c_str()), &printer_handle, nullptr)) {
+        ErrorHandler::GetInstance().SetError(-1, "Failed to open printer: " + printer_name);
+        return false;
+    }
+    
+    // Start document
+    DOC_INFO_1 doc_info;
+    ZeroMemory(&doc_info, sizeof(doc_info));
+    doc_info.pDocName = job_name.empty() ? L"PDF_LIB Print Job" : ToWideString(job_name).c_str();
+    doc_info.pOutputFile = nullptr;
+    doc_info.pDatatype = L"RAW";
+    
+    DWORD job_id = StartDocPrinter(printer_handle, 1, reinterpret_cast<LPBYTE>(&doc_info));
+    if (job_id == 0) {
+        ClosePrinter(printer_handle);
+        ErrorHandler::GetInstance().SetError(-1, "Failed to start print job");
+        return false;
+    }
+    
+    // Start page
+    if (!StartPagePrinter(printer_handle)) {
+        EndDocPrinter(printer_handle);
+        ClosePrinter(printer_handle);
+        ErrorHandler::GetInstance().SetError(-1, "Failed to start page");
+        return false;
+    }
+    
+    // Read and write file data
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file.is_open()) {
+        EndPagePrinter(printer_handle);
+        EndDocPrinter(printer_handle);
+        ClosePrinter(printer_handle);
+        ErrorHandler::GetInstance().SetError(-1, "Failed to open file: " + file_path);
+        return false;
+    }
+    
+    const size_t buffer_size = 8192;
+    std::vector<char> buffer(buffer_size);
+    
+    while (file.read(buffer.data(), buffer_size)) {
+        DWORD bytes_written = 0;
+        if (!WritePrinter(printer_handle, buffer.data(), static_cast<DWORD>(file.gcount()), &bytes_written)) {
+            file.close();
+            EndPagePrinter(printer_handle);
+            EndDocPrinter(printer_handle);
+            ClosePrinter(printer_handle);
+            ErrorHandler::GetInstance().SetError(-1, "Failed to write to printer");
+            return false;
+        }
+    }
+    
+    file.close();
+    
+    // End page and document
+    if (!EndPagePrinter(printer_handle)) {
+        EndDocPrinter(printer_handle);
+        ClosePrinter(printer_handle);
+        ErrorHandler::GetInstance().SetError(-1, "Failed to end page");
+        return false;
+    }
+    
+    if (!EndDocPrinter(printer_handle)) {
+        ClosePrinter(printer_handle);
+        ErrorHandler::GetInstance().SetError(-1, "Failed to end document");
+        return false;
+    }
+    
+    ClosePrinter(printer_handle);
+    return true;
+#else
+    ErrorHandler::GetInstance().SetError(-1, "Windows printer support not available on this platform");
+    return false;
+#endif
+}
+
+bool WindowsPrinter::PrintRawData(const std::string& printer_name, 
+                                  const void* data, 
+                                  size_t data_size, 
+                                  const std::string& job_name) {
+#ifdef _WIN32
+    HANDLE printer_handle;
+    std::wstring wprinter_name = ToWideString(printer_name);
+    
+    if (!OpenPrinter(const_cast<LPWSTR>(wprinter_name.c_str()), &printer_handle, nullptr)) {
+        ErrorHandler::GetInstance().SetError(-1, "Failed to open printer: " + printer_name);
+        return false;
+    }
+    
+    // Start document
+    DOC_INFO_1 doc_info;
+    ZeroMemory(&doc_info, sizeof(doc_info));
+    doc_info.pDocName = job_name.empty() ? L"PDF_LIB Print Job" : ToWideString(job_name).c_str();
+    doc_info.pOutputFile = nullptr;
+    doc_info.pDatatype = L"RAW";
+    
+    DWORD job_id = StartDocPrinter(printer_handle, 1, reinterpret_cast<LPBYTE>(&doc_info));
+    if (job_id == 0) {
+        ClosePrinter(printer_handle);
+        ErrorHandler::GetInstance().SetError(-1, "Failed to start print job");
+        return false;
+    }
+    
+    // Start page
+    if (!StartPagePrinter(printer_handle)) {
+        EndDocPrinter(printer_handle);
+        ClosePrinter(printer_handle);
+        ErrorHandler::GetInstance().SetError(-1, "Failed to start page");
+        return false;
+    }
+    
+    // Write data
+    DWORD bytes_written = 0;
+    if (!WritePrinter(printer_handle, data, static_cast<DWORD>(data_size), &bytes_written)) {
+        EndPagePrinter(printer_handle);
+        EndDocPrinter(printer_handle);
+        ClosePrinter(printer_handle);
+        ErrorHandler::GetInstance().SetError(-1, "Failed to write to printer");
+        return false;
+    }
+    
+    // End page and document
+    if (!EndPagePrinter(printer_handle)) {
+        EndDocPrinter(printer_handle);
+        ClosePrinter(printer_handle);
+        ErrorHandler::GetInstance().SetError(-1, "Failed to end page");
+        return false;
+    }
+    
+    if (!EndDocPrinter(printer_handle)) {
+        ClosePrinter(printer_handle);
+        ErrorHandler::GetInstance().SetError(-1, "Failed to end document");
+        return false;
+    }
+    
+    ClosePrinter(printer_handle);
+    return true;
+#else
+    ErrorHandler::GetInstance().SetError(-1, "Windows printer support not available on this platform");
+    return false;
+#endif
+}
+
+#ifdef _WIN32
+std::wstring WindowsPrinter::ToWideString(const std::string& str) {
+    if (str.empty()) return std::wstring();
+    
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), static_cast<int>(str.size()), nullptr, 0);
+    std::wstring wstr(size_needed, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), static_cast<int>(str.size()), &wstr[0], size_needed);
+    return wstr;
+}
+
+std::string WindowsPrinter::FromWideString(const std::wstring& wstr) {
+    if (wstr.empty()) return std::string();
+    
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
+    std::string str(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()), &str[0], size_needed, nullptr, nullptr);
+    return str;
+}
+#endif
+
+} // namespace PDFLib 

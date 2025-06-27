@@ -1,0 +1,138 @@
+#!/bin/bash
+
+# pdf_gs_wrapper - Ghostscript-compatible command for PDF_LIB
+# Handles: pdf_gs -sDEVICE=pdfwrite -sOutputFile=output.pdf input.ps
+
+# Parse arguments to extract device, output file, and input file
+DEVICE=""
+OUTPUT_FILE=""
+INPUT_FILES=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+    -sDEVICE=*)
+        DEVICE="${1#*=}"
+        shift
+        ;;
+    -sOutputFile=*)
+        OUTPUT_FILE="${1#*=}"
+        shift
+        ;;
+    -dBATCH | -dNOPAUSE | -dQUIET | -dSAFER)
+        # Ignore common Ghostscript flags for compatibility
+        shift
+        ;;
+    -*)
+        # Ignore other flags
+        shift
+        ;;
+    *)
+        # Input files
+        INPUT_FILES+=("$1")
+        shift
+        ;;
+    esac
+done
+
+# Validate arguments
+if [[ ${#INPUT_FILES[@]} -eq 0 ]]; then
+    echo "Error: No input files specified"
+    exit 1
+fi
+
+if [[ "$DEVICE" != "pdfwrite" ]]; then
+    echo "Error: Only pdfwrite device is supported in this version"
+    exit 1
+fi
+
+if [[ -z "$OUTPUT_FILE" ]]; then
+    echo "Error: No output file specified"
+    exit 1
+fi
+
+# Convert each input file
+for INPUT_FILE in "${INPUT_FILES[@]}"; do
+    if [[ ! -f "$INPUT_FILE" ]]; then
+        echo "Error: Input file '$INPUT_FILE' not found"
+        exit 1
+    fi
+
+    echo "PDF_LIB PostScript to PDF Converter"
+    echo "Processing: $INPUT_FILE -> $OUTPUT_FILE"
+
+    # Get script directory
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+    # Create conversion program
+    cat >/tmp/pdf_gs_convert.cpp <<EOF
+#include "$SCRIPT_DIR/include/pdf_lib.h"
+#include <iostream>
+#include <string>
+
+using namespace PDFLib;
+
+int main(int argc, char* argv[]) {
+    if (argc != 3) {
+        std::cerr << "Usage: convert input.ps output.pdf\\n";
+        return 1;
+    }
+    
+    std::string input_file = argv[1];
+    std::string output_file = argv[2];
+    
+    try {
+        PDFProcessor processor;
+        
+        ProcessingOptions options;
+        options.input_files = {input_file};
+        options.output_file = output_file;
+        options.device_name = "pdfwrite";
+        options.quality = PDFQuality::PRINTER;
+        options.compatibility_level = 1.7;
+        options.paper_size = PaperSize::A4;
+        options.quiet = false;
+        options.safer_mode = true;
+        options.batch_mode = true;
+        options.no_pause = true;
+        
+        if (!processor.Initialize(options)) {
+            std::cerr << "Error: " << processor.GetLastErrorString() << "\\n";
+            return 1;
+        }
+        
+        if (!processor.Process()) {
+            std::cerr << "Error: " << processor.GetLastErrorString() << "\\n";
+            return 1;
+        }
+        
+        return 0;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\\n";
+        return 1;
+    }
+}
+EOF
+
+    # Compile
+    cd "$SCRIPT_DIR" || exit 1
+    g++ -std=c++17 -O2 -I"$SCRIPT_DIR/include" -I"$SCRIPT_DIR/src" /tmp/pdf_gs_convert.cpp "$SCRIPT_DIR/build/lib/libpdf_lib.a" -o /tmp/pdf_gs_convert 2>/dev/null
+
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to compile converter"
+        exit 1
+    fi
+
+    # Convert
+    /tmp/pdf_gs_convert "$INPUT_FILE" "$OUTPUT_FILE"
+    RESULT=$?
+
+    if [ $RESULT -eq 0 ]; then
+        echo "Conversion completed successfully"
+    fi
+
+    # Clean up
+    rm -f /tmp/pdf_gs_convert.cpp /tmp/pdf_gs_convert
+
+    exit $RESULT
+done

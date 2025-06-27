@@ -1,0 +1,40 @@
+%!PS-Adobe-3.0
+%%BoundingBox: 0 0 612 792
+%%Creator: Ghostscript Replacement Test
+%%Title: Test PostScript Document
+%%CreationDate: 2024-01-01
+%%EndComments
+
+% Set up the page
+/Helvetica findfont 12 scalefont setfont
+72 720 moveto
+
+% Draw some text
+(Hello, PostScript World!) show
+
+% Draw a rectangle
+newpath
+100 100 moveto
+200 0 rlineto
+0 100 rlineto
+-200 0 rlineto
+closepath
+stroke
+
+% Draw a circle
+newpath
+300 300 50 0 360 arc
+stroke
+
+% Set color and draw filled rectangle
+0.8 0.2 0.2 setrgbcolor
+newpath
+400 400 moveto
+100 0 rlineto
+0 50 rlineto
+-100 0 rlineto
+closepath
+fill
+
+% Show page
+showpage 
