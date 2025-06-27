@@ -244,6 +244,22 @@ private:
         content << "q\n"; // Save graphics state
         content << "1 0 0 1 0 0 cm\n"; // Identity matrix
         
+        // Set default stroke color to black and line width for visibility
+        content << "0 0 0 RG\n"; // Set stroke color to black (RGB)
+        content << "0 0 0 rg\n"; // Set fill color to black (RGB)  
+        content << "1 w\n"; // Set line width to 1 point
+        content << "1 J\n"; // Set line cap to round
+        content << "1 j\n"; // Set line join to round
+        
+        // Add debug: draw a simple test rectangle to verify PDF structure
+        content << "% Test rectangle\n";
+        content << "100 100 m\n";
+        content << "150 100 l\n";
+        content << "150 150 l\n";
+        content << "100 150 l\n";
+        content << "h\n";
+        content << "S\n";
+        
         // Render paths first (background graphics)
         bool has_open_path = false;
         for (const auto& path : page.paths) {
@@ -252,6 +268,7 @@ private:
                     if (path.points.size() >= 2) {
                         if (has_open_path) {
                             content << "S\n"; // Stroke previous path
+                            has_open_path = false;
                         }
                         content << path.points[0] << " " << path.points[1] << " m\n";
                         has_open_path = true;
@@ -288,7 +305,7 @@ private:
             content << "/F1 12 Tf\n"; // Set font
             
             for (const auto& text : page.text_elements) {
-                // Set text color
+                // Set text color (non-stroking color for text)
                 content << text.color_rgb[0] << " " << text.color_rgb[1] << " " << text.color_rgb[2] << " rg\n";
                 // Position text 
                 content << "1 0 0 1 " << text.x << " " << text.y << " Tm\n";
